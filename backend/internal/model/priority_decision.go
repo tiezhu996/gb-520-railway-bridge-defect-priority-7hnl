@@ -18,6 +18,16 @@ type PriorityDecision struct {
 	RelatedCode string                     `json:"relatedCode" gorm:"size:64;index"`
 	PreparedBy  string                     `json:"preparedBy" gorm:"size:80;index;not null"`
 	Revisions   []PriorityDecisionRevision `json:"revisions" gorm:"foreignKey:PriorityDecisionID;constraint:OnDelete:CASCADE"`
+
+	// ReleaseEligible is derived, never persisted: a finalized restrict/urgent
+	// decision becomes releasable once every defect on the same bridge
+	// (Facility) is mitigated or closed. It is recomputed on every read, so a
+	// newly confirmed defect withdraws the marker automatically.
+	ReleaseEligible bool `json:"releaseEligible" gorm:"-"`
+	// OutstandingDefectCodes lists defects on the same bridge that are not yet
+	// mitigated or closed. Derived on read and returned alongside the marker so
+	// the workbench can show what still blocks the close-out.
+	OutstandingDefectCodes []string `json:"outstandingDefectCodes" gorm:"-"`
 }
 
 func (item *PriorityDecision) GetBase() *BaseModel { return &item.BaseModel }

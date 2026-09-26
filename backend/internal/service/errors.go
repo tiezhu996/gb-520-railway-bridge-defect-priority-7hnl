@@ -11,4 +11,7 @@ var (
 	ErrReviewRole        = errors.New("reviewer or admin role is required to finalize a priority")
 	ErrSeparationOfDuty  = errors.New("priority preparer cannot approve the same decision")
 	ErrNotDecisionOwner  = errors.New("only the preparer may edit this draft decision")
+	ErrReleaseNotAllowed = errors.New("only finalized speed restrictions or urgent handling decisions can be released")
+	ErrReleaseBlocked    = errors.New("outstanding defects on the same bridge must be mitigated or closed before release")
+	ErrReleaseRole       = errors.New("reviewer or admin role is required to release a priority")
 )

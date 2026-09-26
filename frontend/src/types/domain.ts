@@ -17,6 +17,10 @@ export interface DomainRecord {
   relatedCode: string;
   preparedBy?: string;
   revisions?: PriorityDecisionRevision[];
+  /** Derived by the backend: finalized restrict/urgent decision can be released once all same-bridge defects are mitigated/closed. */
+  releaseEligible?: boolean;
+  /** Defect codes on the same bridge that are not yet mitigated/closed. */
+  outstandingDefectCodes?: string[];
   createdAt: string;
   updatedAt: string;
 }

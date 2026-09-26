@@ -36,7 +36,7 @@ func New(cfg config.Config, db *gorm.DB, redisClient *redis.Client, logger *slog
 	bridgeAssetService := service.NewBridgeAssetService(bridgeAssetRepository, securityService)
 	inspectionRoundService := service.NewInspectionRoundService(inspectionRoundRepository, securityService)
 	defectFindingService := service.NewDefectFindingService(defectFindingRepository, securityService)
-	priorityDecisionService := service.NewPriorityDecisionService(priorityDecisionRepository, securityService)
+	priorityDecisionService := service.NewPriorityDecisionService(priorityDecisionRepository, defectFindingRepository, securityService)
 	bridgeAssetHandler := handler.NewBridgeAssetHandler(bridgeAssetService)
 	inspectionRoundHandler := handler.NewInspectionRoundHandler(inspectionRoundService)
 	defectFindingHandler := handler.NewDefectFindingHandler(defectFindingService)

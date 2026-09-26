@@ -36,12 +36,13 @@ docker compose down -v --remove-orphans
 | 桥梁资产 | `BridgeAsset` | `/api/bridges` | active, restricted, closed, retired |
 | 检查批次 | `InspectionRound` | `/api/inspections` | planned, running, review, completed |
 | 缺陷发现 | `DefectFinding` | `/api/defects` | new, verified, monitoring, mitigated, closed |
-| 优先级决定 | `PriorityDecision` | `/api/priorities` | draft → observe/restrict/urgent（终态） |
+| 优先级决定 | `PriorityDecision` | `/api/priorities` | draft → observe/restrict/urgent（定稿终态）；restrict/urgent → released（复核解除收尾） |
 
 - JWT 登录和 viewer/operator/reviewer/admin 四级 RBAC，后端路由与前端守卫、导航和按钮保持一致。
 - 所有状态变化使用乐观锁并写入审计日志；审计查询仅 reviewer/admin 可见。
 - 优先级决定的每次创建、草稿更新和定稿均追加不可变版本，保留证据、状态、操作者、request ID 和完整快照。
 - 优先级只能由不同于拟制人的 reviewer/admin 定稿；observe/restrict/urgent 均为不可覆盖终态。
+- 定稿过的限速（restrict）或立即处置（urgent）决定，工作台按同一桥梁（`facility`）自动盯办收尾：当该桥缺陷全部为已缓解（mitigated）或已关闭（closed）时，决定被标记为 `releaseEligible`（可以解除），并在 `outstandingDefectCodes` 中列出尚未处理完的缺陷编码；解除前若又出现未缓解/关闭的已确认缺陷，标记会立即收回。解除（`POST /api/priorities/:id/release`）只能由不同于拟制人的 reviewer/admin 执行，解除后状态记为 `released`（已解除），不再是现行要求，并追加一条不可变版本与 `release` 审计。observe（观察）决定不参与解除收尾。
 - 请求 ID、结构化日志、全局错误映射和 Redis 分布式限流。
 - 提供脱敏运行配置、当前会话、审计汇总和单实体审计历史接口。
 - 业务工作台支持查询、新建、状态推进、风险标识及操作审计查看。
@@ -124,6 +125,9 @@ cd .. && docker compose config --quiet
 |---|---|---|
 | `DefectState` | `new, verified, monitoring, mitigated, closed` | `backend/internal/constants/status.go`、`frontend/src/types/status.ts` |
 | `PriorityLevel` | `observe, restrict, urgent` | `backend/internal/constants/status.go`、`frontend/src/types/status.ts` |
+| `PriorityStatus.released` | `released`（限速/立即处置解除后的终态） | `backend/internal/constants/status.go`（`PriorityStatusReleased`）、`frontend/src/types/status.ts`（`PriorityStatus`） |
+
+`releaseEligible` 与 `outstandingDefectCodes` 是只读派生字段（后端读取时实时计算、不落库），定义于 `backend/internal/model/priority_decision.go` 与 `frontend/src/types/domain.ts`；判定阈值（同桥缺陷须全部 mitigated/closed）位于 `backend/internal/constants/status.go` 的 `ResolvedDefectStates` / `ReleasablePriorityStatuses`。
 
 每个实体自己的完整迁移图同样位于 `backend/internal/constants/status.go`；页面使用的状态列表位于 `frontend/src/types/status.ts`。修改状态时必须同步两处并更新对应服务测试。
 

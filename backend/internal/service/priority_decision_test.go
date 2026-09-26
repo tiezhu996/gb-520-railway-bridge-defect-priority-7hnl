@@ -16,7 +16,7 @@ import (
 )
 
 func TestPriorityDecisionVersionedIndependentReview(t *testing.T) {
-	service := newPriorityTestService(t)
+	service, _ := newPriorityTestService(t)
 	ctx := context.Background()
 	created, err := service.Create(ctx, priorityCreateInput("PD-TEST", "evidence-v1"), "operator", "req-create")
 	if err != nil {
@@ -62,18 +62,18 @@ func TestPriorityDecisionVersionedIndependentReview(t *testing.T) {
 	}
 }
 
-func newPriorityTestService(t *testing.T) PriorityDecisionService {
+func newPriorityTestService(t *testing.T) (PriorityDecisionService, *gorm.DB) {
 	t.Helper()
 	dsn := fmt.Sprintf("file:priority-%d?mode=memory&cache=shared", time.Now().UnixNano())
 	db, err := gorm.Open(sqlite.Open(dsn), &gorm.Config{})
 	if err != nil {
 		t.Fatalf("open sqlite: %v", err)
 	}
-	if err := db.AutoMigrate(&model.PriorityDecision{}, &model.PriorityDecisionRevision{}, &model.AuditLog{}); err != nil {
+	if err := db.AutoMigrate(&model.PriorityDecision{}, &model.PriorityDecisionRevision{}, &model.DefectFinding{}, &model.AuditLog{}); err != nil {
 		t.Fatalf("migrate sqlite: %v", err)
 	}
 	security := NewSecurityService(repository.NewSecurityRepository(db), config.Config{})
-	return NewPriorityDecisionService(repository.NewPriorityDecisionRepository(db), security)
+	return NewPriorityDecisionService(repository.NewPriorityDecisionRepository(db), repository.NewDefectFindingRepository(db), security), db
 }
 
 func priorityCreateInput(code, evidence string) dto.CreatePriorityDecision {
