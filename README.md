@@ -36,12 +36,13 @@ docker compose down -v --remove-orphans
 | 桥梁资产 | `BridgeAsset` | `/api/bridges` | active, restricted, closed, retired |
 | 检查批次 | `InspectionRound` | `/api/inspections` | planned, running, review, completed |
 | 缺陷发现 | `DefectFinding` | `/api/defects` | new, verified, monitoring, mitigated, closed |
-| 优先级决定 | `PriorityDecision` | `/api/priorities` | draft → observe/restrict/urgent（终态） |
+| 优先级决定 | `PriorityDecision` | `/api/priorities` | draft → observe/restrict/urgent；restrict/urgent 经独立复核解除 → released（终态） |
 
 - JWT 登录和 viewer/operator/reviewer/admin 四级 RBAC，后端路由与前端守卫、导航和按钮保持一致。
 - 所有状态变化使用乐观锁并写入审计日志；审计查询仅 reviewer/admin 可见。
 - 优先级决定的每次创建、草稿更新和定稿均追加不可变版本，保留证据、状态、操作者、request ID 和完整快照。
 - 优先级只能由不同于拟制人的 reviewer/admin 定稿；observe/restrict/urgent 均为不可覆盖终态。
+- 限速（restrict）与立即处置（urgent）决定的**解除收尾**由优先级工作台自动盯住：当同一座桥梁（按 `facility` 关联）的缺陷全部到达 `mitigated/closed` 时，记录在读取时动态呈现 `releaseReady=true`，并通过 `pendingDefectCodes` 列出仍未处理完的缺陷编码；解除前若又冒出已确认缺陷，该标记在下一次读取时自动收回，无需补偿写入。解除只能由不同于拟制人的 reviewer/admin 通过专用 `POST /api/priorities/:id/release` 执行（乐观锁 + 版本审计），成功后状态为 `released`，不再是现行要求；`released` 刻意不接入通用状态迁移图，无法经 `transition` 端点绕过缺陷门控。
 - 请求 ID、结构化日志、全局错误映射和 Redis 分布式限流。
 - 提供脱敏运行配置、当前会话、审计汇总和单实体审计历史接口。
 - 业务工作台支持查询、新建、状态推进、风险标识及操作审计查看。
@@ -124,6 +125,7 @@ cd .. && docker compose config --quiet
 |---|---|---|
 | `DefectState` | `new, verified, monitoring, mitigated, closed` | `backend/internal/constants/status.go`、`frontend/src/types/status.ts` |
 | `PriorityLevel` | `observe, restrict, urgent` | `backend/internal/constants/status.go`、`frontend/src/types/status.ts` |
+| 优先级解除终态 | `released`（仅经 `POST /api/priorities/:id/release`，不在通用迁移图） | `backend/internal/constants/status.go`、`frontend/src/types/status.ts` |
 
 每个实体自己的完整迁移图同样位于 `backend/internal/constants/status.go`；页面使用的状态列表位于 `frontend/src/types/status.ts`。修改状态时必须同步两处并更新对应服务测试。
 

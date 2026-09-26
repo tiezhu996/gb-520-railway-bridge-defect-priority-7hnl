@@ -19,25 +19,80 @@ type PriorityDecisionService interface {
 	Create(context.Context, dto.CreatePriorityDecision, string, string) (model.PriorityDecision, error)
 	Update(context.Context, uint, dto.UpdatePriorityDecision, string, string, string) (model.PriorityDecision, error)
 	Transition(context.Context, uint, dto.TransitionRequest, string, string, string) (model.PriorityDecision, error)
+	Release(context.Context, uint, dto.ReleasePriorityDecision, string, string, string) (model.PriorityDecision, error)
 	Delete(context.Context, uint, string, string) error
 	StatusCounts(context.Context) (map[string]int64, error)
 }
 
 type priorityDecisionService struct {
 	repository repository.PriorityDecisionRepository
+	defects    repository.DefectFindingRepository
 	security   SecurityService
 }
 
-func NewPriorityDecisionService(repo repository.PriorityDecisionRepository, security SecurityService) PriorityDecisionService {
-	return &priorityDecisionService{repository: repo, security: security}
+func NewPriorityDecisionService(repo repository.PriorityDecisionRepository, defects repository.DefectFindingRepository, security SecurityService) PriorityDecisionService {
+	return &priorityDecisionService{repository: repo, defects: defects, security: security}
 }
 
 func (s *priorityDecisionService) List(ctx context.Context, query dto.PageQuery) (repository.Page[model.PriorityDecision], error) {
-	return s.repository.List(ctx, query)
+	page, err := s.repository.List(ctx, query)
+	if err != nil {
+		return page, err
+	}
+	if err := s.populateReleaseReadiness(ctx, page.Items); err != nil {
+		return repository.Page[model.PriorityDecision]{}, err
+	}
+	return page, nil
 }
 
 func (s *priorityDecisionService) Get(ctx context.Context, id uint) (model.PriorityDecision, error) {
-	return s.repository.Get(ctx, id)
+	item, err := s.repository.Get(ctx, id)
+	if err != nil {
+		return model.PriorityDecision{}, err
+	}
+	enriched := []model.PriorityDecision{item}
+	if err := s.populateReleaseReadiness(ctx, enriched); err != nil {
+		return model.PriorityDecision{}, err
+	}
+	return enriched[0], nil
+}
+
+// populateReleaseReadiness derives the "can release" view for each decision
+// from the live defect state of its bridge. Because it runs on every read, a
+// newly confirmed defect withdraws the flag automatically — there is no stored
+// flag to invalidate.
+func (s *priorityDecisionService) populateReleaseReadiness(ctx context.Context, items []model.PriorityDecision) error {
+	cache := make(map[string][]model.DefectFinding)
+	for i := range items {
+		facility := items[i].Facility
+		defects, cached := cache[facility]
+		if !cached {
+			var err error
+			defects, err = s.defects.ListByFacility(ctx, facility)
+			if err != nil {
+				return fmt.Errorf("load bridge defects for release readiness: %w", err)
+			}
+			cache[facility] = defects
+		}
+		items[i].ActiveRequirement = model.PriorityDecisionActiveStatuses[items[i].Status]
+		items[i].PendingDefectCodes = pendingDefectCodes(defects)
+		items[i].ReleaseReady = items[i].ActiveRequirement &&
+			len(defects) > 0 && len(items[i].PendingDefectCodes) == 0
+	}
+	return nil
+}
+
+// pendingDefectCodes returns the codes of defects on a bridge that are not yet
+// mitigated or closed. New, verified and monitoring defects keep an active
+// restriction in force.
+func pendingDefectCodes(defects []model.DefectFinding) []string {
+	codes := make([]string, 0)
+	for _, defect := range defects {
+		if defect.Status != string(constants.DefectStateMitigated) && defect.Status != string(constants.DefectStateClosed) {
+			codes = append(codes, defect.Code)
+		}
+	}
+	return codes
 }
 
 func (s *priorityDecisionService) Create(ctx context.Context, input dto.CreatePriorityDecision, actor, requestID string) (model.PriorityDecision, error) {
@@ -133,6 +188,54 @@ func (s *priorityDecisionService) Transition(ctx context.Context, id uint, input
 	}
 	if err := s.security.Audit(ctx, actor, requestID, "transition", "PriorityDecision", id, before, target, input.Reason); err != nil {
 		return model.PriorityDecision{}, fmt.Errorf("persist transition audit: %w", err)
+	}
+	return s.repository.Get(ctx, id)
+}
+
+func (s *priorityDecisionService) Release(ctx context.Context, id uint, input dto.ReleasePriorityDecision, actor, role, requestID string) (model.PriorityDecision, error) {
+	current, err := s.repository.Get(ctx, id)
+	if err != nil {
+		return model.PriorityDecision{}, err
+	}
+	// Separation of duties: the release is an independent review action, so the
+	// person who prepared the decision can never release it themselves.
+	if role != model.RoleReviewer && role != model.RoleAdmin {
+		return model.PriorityDecision{}, ErrReleaseRole
+	}
+	if actor == current.PreparedBy {
+		return model.PriorityDecision{}, ErrSeparationOfDuty
+	}
+	switch {
+	case current.Status == model.PriorityDecisionStatusReleased:
+		return model.PriorityDecision{}, ErrAlreadyReleased
+	case !model.PriorityDecisionActiveStatuses[current.Status]:
+		return model.PriorityDecision{}, ErrReleaseNotActive
+	}
+	// Defect gate, evaluated against live data. A newly confirmed defect on the
+	// same bridge fails here even if the workbench previously showed the flag.
+	defects, err := s.defects.ListByFacility(ctx, current.Facility)
+	if err != nil {
+		return model.PriorityDecision{}, fmt.Errorf("load bridge defects for release: %w", err)
+	}
+	if len(defects) == 0 {
+		return model.PriorityDecision{}, ErrNoBridgeDefects
+	}
+	if pending := pendingDefectCodes(defects); len(pending) > 0 {
+		return model.PriorityDecision{}, fmt.Errorf("%w: %s", ErrDefectsPending, strings.Join(pending, ", "))
+	}
+	before := current.Status
+	current.Status = model.PriorityDecisionStatusReleased
+	current.Version = input.ExpectedVersion + 1
+	current.UpdatedAt = time.Now().UTC()
+	revision, err := newPriorityRevision(current, strings.TrimSpace(input.Reason), actor, requestID)
+	if err != nil {
+		return model.PriorityDecision{}, err
+	}
+	if err := s.repository.UpdateWithRevision(ctx, id, input.ExpectedVersion, &current, &revision); err != nil {
+		return model.PriorityDecision{}, fmt.Errorf("release 优先级决定: %w", err)
+	}
+	if err := s.security.Audit(ctx, actor, requestID, "release", "PriorityDecision", id, before, current.Status, input.Reason); err != nil {
+		return model.PriorityDecision{}, fmt.Errorf("persist release audit: %w", err)
 	}
 	return s.repository.Get(ctx, id)
 }

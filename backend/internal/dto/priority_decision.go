@@ -33,3 +33,10 @@ type UpdatePriorityDecision struct {
 	Evidence        string    `json:"evidence" binding:"required,max=2000"`
 	RelatedCode     string    `json:"relatedCode" binding:"required,max=64"`
 }
+
+// ReleasePriorityDecision drives the dedicated release endpoint. The target
+// released status is intentionally absent so callers cannot pick it.
+type ReleasePriorityDecision struct {
+	ExpectedVersion uint   `json:"expectedVersion" binding:"required"`
+	Reason          string `json:"reason" binding:"required,min=3,max=500"`
+}

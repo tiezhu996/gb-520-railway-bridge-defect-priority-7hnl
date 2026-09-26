@@ -25,6 +25,17 @@ const (
 
 var AllPriorityLevel = []string{"observe", "restrict", "urgent"}
 
+// PriorityDecisionStatusReleased is mirrored from the model. The released
+// state is a terminal follow-up to a finalized restrict/urgent decision once
+// every defect on the same bridge is mitigated/closed.
+const PriorityDecisionStatusReleased = "released"
+
+// AllPriorityDecisionStatus lists every persisted decision status, including
+// the post-release terminal state. The release transition itself is excluded
+// from PriorityDecisionTransitions so the generic transition endpoint can
+// never bypass the release gate (role separation + defect clearance checks).
+var AllPriorityDecisionStatus = []string{"draft", "observe", "restrict", "urgent", PriorityDecisionStatusReleased}
+
 var BridgeAssetTransitions = map[string]map[string]bool{
 	"active":     {"restricted": true, "closed": true},
 	"restricted": {"closed": true, "retired": true, "active": true},

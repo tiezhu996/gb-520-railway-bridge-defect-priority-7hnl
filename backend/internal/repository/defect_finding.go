@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"strings"
 
 	"github.com/blueship581/railway-bridge-defect-priority/backend/internal/dto"
 	"github.com/blueship581/railway-bridge-defect-priority/backend/internal/model"
@@ -16,6 +17,7 @@ type DefectFindingRepository interface {
 	Update(context.Context, uint, uint, *model.DefectFinding) error
 	Delete(context.Context, uint) error
 	CountByStatus(context.Context) (map[string]int64, error)
+	ListByFacility(context.Context, string) ([]model.DefectFinding, error)
 }
 
 type defectFindingRepository struct {
@@ -43,4 +45,11 @@ func (r *defectFindingRepository) Delete(ctx context.Context, id uint) error {
 }
 func (r *defectFindingRepository) CountByStatus(ctx context.Context) (map[string]int64, error) {
 	return r.store.CountByStatus(ctx)
+}
+func (r *defectFindingRepository) ListByFacility(ctx context.Context, facility string) ([]model.DefectFinding, error) {
+	items := make([]model.DefectFinding, 0)
+	err := r.store.DB().WithContext(ctx).
+		Where("facility = ?", strings.TrimSpace(facility)).
+		Order("code ASC").Find(&items).Error
+	return items, err
 }

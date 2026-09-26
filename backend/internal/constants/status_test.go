@@ -10,3 +10,11 @@ func TestBridgeAssetTransitionGraph(t *testing.T) {
 		t.Fatal("unknown status must never be accepted")
 	}
 }
+
+func TestReleaseIsNotReachableViaGenericTransition(t *testing.T) {
+	for _, from := range AllPriorityLevel {
+		if CanTransition(PriorityDecisionTransitions, from, PriorityDecisionStatusReleased) {
+			t.Fatalf("generic transition graph must not allow %s -> released; release requires the gated endpoint", from)
+		}
+	}
+}

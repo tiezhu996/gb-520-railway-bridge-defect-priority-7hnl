@@ -15,8 +15,12 @@ const { session, canAtLeast } = useAuth();
 const search = ref('');
 const showCreate = ref(false);
 const pending = ref<{ item: DomainRecord; status: string } | null>(null);
+const releasing = ref<DomainRecord | null>(null);
 const canWrite = computed(() => canAtLeast('operator'));
 const highRisk = computed(() => props.store.items.filter((item: DomainRecord) => ['high', 'critical'].includes(item.riskLevel)).length);
+const releaseReadyCount = computed(() => props.config.key === 'priorityDecision'
+	? props.store.items.filter((item: DomainRecord) => item.releaseReady).length
+	: 0);
 
 onMounted(() => void props.store.load(props.config.path));
 
@@ -25,6 +29,23 @@ function targetsFor(item: DomainRecord): readonly string[] {
 		if (!canAtLeast('reviewer') || item.preparedBy === session.value?.username) return [];
 	} else if (!canWrite.value) return [];
 	return allowedTargets(props.config.key, item.status);
+}
+
+function isPriorityPage(): boolean {
+	return props.config.key === 'priorityDecision';
+}
+
+// Release is an independent review action: only a reviewer/admin who did not
+// prepare the decision, and only when the workbench marks it release-ready.
+function canRelease(item: DomainRecord): boolean {
+	return isPriorityPage()
+		&& Boolean(item.releaseReady)
+		&& canAtLeast('reviewer')
+		&& item.preparedBy !== session.value?.username;
+}
+
+function pendingDefectText(item: DomainRecord): string {
+	return (item.pendingDefectCodes || []).join('、') || '-';
 }
 
 function latestRevision(item: DomainRecord): PriorityDecisionRevision | undefined {
@@ -47,6 +68,12 @@ async function confirmTransition() {
 	const changed = await props.store.transition(props.config.path, pending.value.item, pending.value.status);
 	if (changed) { search.value = ''; pending.value = null; }
 }
+
+async function confirmRelease() {
+	if (!releasing.value) return;
+	const changed = await props.store.release(props.config.path, releasing.value, '同桥缺陷均已缓解或关闭，独立复核解除限速/立即处置要求');
+	if (changed) { releasing.value = null; }
+}
 </script>
 
 <template>
@@ -58,6 +85,7 @@ async function confirmTransition() {
 		<section class="metrics">
 			<MetricCard label="记录总数" :value="store.meta.total" detail="当前筛选范围"/>
 			<MetricCard label="高风险" :value="highRisk" detail="需要优先复核"/>
+			<MetricCard v-if="isPriorityPage()" label="可解除收尾" :value="releaseReadyCount" detail="同桥缺陷均已缓解/关闭"/>
 			<MetricCard label="状态种类" :value="new Set(store.items.map((item: DomainRecord) => item.status)).size" detail="状态机覆盖"/>
 		</section>
 		<section v-if="showEvidence" class="evidence-panel"><header><strong>证据摘要</strong><span>最近四条记录</span></header><EvidenceGallery :records="store.items"/></section>
@@ -72,11 +100,21 @@ async function confirmTransition() {
 				<el-table-column prop="owner" label="责任人" min-width="130"/>
 				<el-table-column label="指标" width="120"><template #default="{ row }">{{ row.metricValue }} {{ row.metricUnit }}</template></el-table-column>
 				<el-table-column v-if="config.key === 'priorityDecision'" label="版本审计" width="250"><template #default="{ row }"><strong>v{{ row.version }} · {{ row.preparedBy }}</strong><small>{{ latestRevision(row)?.actor }} · {{ latestRevision(row)?.requestId }}</small><small>{{ latestRevision(row)?.evidence }}</small></template></el-table-column>
+				<el-table-column v-if="isPriorityPage()" label="解除收尾" width="240"><template #default="{ row }">
+					<el-tag v-if="row.status === 'released'" type="success" size="small">已解除</el-tag>
+					<template v-else-if="row.activeRequirement">
+						<el-tag v-if="row.releaseReady" type="success" size="small">可解除</el-tag>
+						<el-tag v-else type="warning" size="small">缺陷未清零</el-tag>
+						<small class="pending-defects" :title="`未完成缺陷：${pendingDefectText(row)}`">待处理：{{ pendingDefectText(row) }}</small>
+					</template>
+					<span v-else class="muted">-</span>
+				</template></el-table-column>
 				<el-table-column label="更新时间" width="180"><template #default="{ row }">{{ formatDate(row.updatedAt) }}</template></el-table-column>
-				<el-table-column label="操作" width="300"><template #default="{ row }"><div class="row-actions"><el-button v-for="target in targetsFor(row)" :key="target" link type="primary" @click="pending = { item: row, status: target }">推进至 {{ target }}</el-button><span v-if="targetsFor(row).length === 0" class="muted">无可用操作</span></div></template></el-table-column>
+				<el-table-column label="操作" width="300"><template #default="{ row }"><div class="row-actions"><el-button v-for="target in targetsFor(row)" :key="target" link type="primary" @click="pending = { item: row, status: target }">推进至 {{ target }}</el-button><el-button v-if="canRelease(row)" link type="success" @click="releasing = row">解除要求</el-button><span v-if="targetsFor(row).length === 0 && !canRelease(row)" class="muted">无可用操作</span></div></template></el-table-column>
 			</el-table>
 		</section>
 		<ConfirmDialog v-model="showCreate" :title="`新增${config.label}`" @confirm="createDemo"><p>将创建一条包含完整责任人、风险和证据信息的记录。</p></ConfirmDialog>
 		<ConfirmDialog :model-value="Boolean(pending)" title="确认状态迁移" @update:model-value="pending = null" @confirm="confirmTransition"><p>状态迁移会写入审计日志并保留请求号；优先级定稿后不可覆盖。</p><strong>{{ pending?.item.status }} → {{ pending?.status }}</strong></ConfirmDialog>
+		<ConfirmDialog :model-value="Boolean(releasing)" title="解除限速/立即处置要求" @update:model-value="releasing = null" @confirm="confirmRelease"><p>同一座桥梁的缺陷均已缓解或关闭；解除后该决定不再是现行要求。解除操作由独立复核人执行并写入版本审计。</p><strong v-if="releasing">{{ releasing.code }} · v{{ releasing.version }} → released</strong></ConfirmDialog>
 	</main>
 </template>

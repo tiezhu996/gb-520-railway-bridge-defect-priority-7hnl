@@ -199,6 +199,11 @@ func seedDefectFinding(ctx context.Context, db *gorm.DB) error {
 			Description: "用于启动验证和主要流程演示的缺陷发现记录"}, Facility: "铁路桥梁缺陷处置优先级区域3", Owner: "安全主管组",
 			Category: "复核", RiskLevel: "high", MetricValue: 37.5, MetricUnit: "score",
 			EffectiveAt: now.Add(6 * time.Hour), Evidence: "已完成基础证据核对", RelatedCode: "REL-520-03"},
+
+		{BaseModel: model.BaseModel{Code: "DF-004", Name: "墩台裂缝复测已缓解", Status: "mitigated", Version: 1,
+			Description: "裂缝加固后复测稳定，限速决定可进入解除收尾"}, Facility: "铁路桥梁缺陷处置优先级区域4", Owner: "桥梁维修组",
+			Category: "重点", RiskLevel: "medium", MetricValue: 18.0, MetricUnit: "mm",
+			EffectiveAt: now.Add(9 * time.Hour), Evidence: "加固验收与复测记录", RelatedCode: "REL-520-04"},
 	}
 	return db.WithContext(ctx).Create(&items).Error
 }
@@ -225,6 +230,11 @@ func seedPriorityDecision(ctx context.Context, db *gorm.DB) error {
 			Description: "用于启动验证和主要流程演示的优先级决定记录"}, Facility: "铁路桥梁缺陷处置优先级区域3", Owner: "安全主管组",
 			Category: "复核", RiskLevel: "high", MetricValue: 37.5, MetricUnit: "score",
 			EffectiveAt: now.Add(6 * time.Hour), Evidence: "已完成基础证据核对", RelatedCode: "DF-003", PreparedBy: "operator"},
+
+		{BaseModel: model.BaseModel{Code: "PD-004", Name: "区域4桥梁限速待解除", Status: "restrict", Version: 2,
+			Description: "同桥缺陷均已缓解，工作台应将其标记为可解除收尾"}, Facility: "铁路桥梁缺陷处置优先级区域4", Owner: "桥梁维修组",
+			Category: "重点", RiskLevel: "medium", MetricValue: 40.0, MetricUnit: "km/h",
+			EffectiveAt: now.Add(9 * time.Hour), Evidence: "限速令及加固验收证据", RelatedCode: "DF-004", PreparedBy: "operator"},
 	}
 	return db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		for index := range items {

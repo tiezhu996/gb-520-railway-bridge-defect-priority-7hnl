@@ -18,6 +18,14 @@ type PriorityDecision struct {
 	RelatedCode string                     `json:"relatedCode" gorm:"size:64;index"`
 	PreparedBy  string                     `json:"preparedBy" gorm:"size:80;index;not null"`
 	Revisions   []PriorityDecisionRevision `json:"revisions" gorm:"foreignKey:PriorityDecisionID;constraint:OnDelete:CASCADE"`
+
+	// Release-readiness view, derived on read from the current defect state of
+	// the same bridge (matched by facility). gorm:"-" keeps them out of the
+	// database, so a newly confirmed defect automatically withdraws the flag
+	// on the next read without any compensating write.
+	ActiveRequirement  bool     `json:"activeRequirement" gorm:"-"`
+	ReleaseReady       bool     `json:"releaseReady" gorm:"-"`
+	PendingDefectCodes []string `json:"pendingDefectCodes" gorm:"-"`
 }
 
 func (item *PriorityDecision) GetBase() *BaseModel { return &item.BaseModel }
@@ -25,6 +33,20 @@ func (item *PriorityDecision) GetBase() *BaseModel { return &item.BaseModel }
 func (item PriorityDecision) TableName() string { return "priority_decisions" }
 
 var PriorityDecisionInitialStatus = "draft"
+
+// PriorityDecisionStatusReleased is the terminal state for a finalized speed
+// restriction (restrict) or immediate-handling (urgent) decision whose bridge
+// defects have all been mitigated or closed. Released decisions no longer
+// impose a current requirement. It is intentionally reachable only through the
+// dedicated release action, never the generic transition graph.
+var PriorityDecisionStatusReleased = "released"
+
+// PriorityDecisionActiveStatuses are the finalized decisions that still impose
+// a current operational requirement and therefore qualify for release review.
+var PriorityDecisionActiveStatuses = map[string]bool{
+	"restrict": true,
+	"urgent":   true,
+}
 
 // PriorityDecisionRevision is append-only. It is written in the same
 // transaction as the aggregate so an accepted version can always be traced

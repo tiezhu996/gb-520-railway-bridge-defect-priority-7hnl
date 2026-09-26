@@ -11,7 +11,7 @@ const transitions: Record<string, Record<string, readonly string[]>> = {
 	bridgeAsset: { active: ['restricted', 'closed'], restricted: ['closed', 'retired', 'active'], closed: ['retired', 'restricted'], retired: ['closed'] },
 	inspectionRound: { planned: ['running', 'review'], running: ['review', 'completed', 'planned'], review: ['completed', 'running'], completed: ['review'] },
 	defectFinding: { new: ['verified', 'monitoring'], verified: ['monitoring', 'mitigated', 'new'], monitoring: ['mitigated', 'closed', 'verified'], mitigated: ['closed', 'monitoring'], closed: ['mitigated'] },
-	priorityDecision: { draft: ['observe', 'restrict', 'urgent'], observe: [], restrict: [], urgent: [] },
+	priorityDecision: { draft: ['observe', 'restrict', 'urgent'], observe: [], restrict: [], urgent: [], released: [] },
 };
 
 export function allowedTargets(entityKey: string, current: string): readonly string[] {

@@ -16,6 +16,11 @@ export interface DomainRecord {
   evidence: string;
   relatedCode: string;
   preparedBy?: string;
+  // Derived by the priority service from the current defect state of the same
+  // bridge. They only exist on priority decisions.
+  activeRequirement?: boolean;
+  releaseReady?: boolean;
+  pendingDefectCodes?: string[];
   revisions?: PriorityDecisionRevision[];
   createdAt: string;
   updatedAt: string;
